@@ -139,6 +139,7 @@ MAKE_FUNCTIONS = {
     'pysquared': 'PySquared',
     'connect4': 'Connect4',
     'g2048': 'G2048',
+    'minesweeper': 'Minesweeper',
     'terraform': 'Terraform',
     'template': 'Template',
     'tripletriad': 'TripleTriad',
