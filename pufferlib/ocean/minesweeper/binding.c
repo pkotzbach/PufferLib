@@ -3,9 +3,10 @@
 #define Env Game
 #include "../env_binding.h"
 
-// 2048.h does not have a 'size' field, so my_init can just return 0
 static int my_init(Env* env, PyObject* args, PyObject* kwargs) {
-    // No custom initialization needed for 2048
+    env->size = unpack(kwargs, "size");
+    env->bombs = unpack(kwargs, "bombs");
+    init(env);
     return 0;
 }
 

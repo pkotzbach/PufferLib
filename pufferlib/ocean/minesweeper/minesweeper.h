@@ -6,9 +6,6 @@
 #include <string.h>
 #include "raylib.h"
 
-#define BOMBS 40
-#define SIZE 16
-
 #define EMPTY 0
 #define SHOWN 10
 #define BOMB 9
@@ -21,9 +18,11 @@
 
 // Precomputed constants
 #define REWARD_MULTIPLIER 0.09090909f
-#define INVALID_MOVE_PENALTY -0.05f
 #define GAME_OVER_PENALTY -1.0f
-#define GOOD_MOVE_REWARD 0.1f
+#define CHECK_REWARD 0.25f
+#define NO_CHECK_PENALTY -0.02f
+#define INVALID_MOVE_PENALTY -0.05f
+// #define MOVE_ON_SHOWN_PENTALTY -0.2f
 
 
 typedef struct {
@@ -37,20 +36,27 @@ typedef struct {
 typedef struct {
     int x;
     int y;
-} Cursor;
+} Point;
 
 typedef struct {
     Log log;                        // Required
-    unsigned char* observations;    // Cheaper in memory if encoded in uint_8
+    char* observations;    // Cheaper in memory if encoded in uint_8
     int* actions;                   // Required
     float* rewards;                 // Required
     unsigned char* terminals;       // Required
     int score;
     int tick;
-    char grid[SIZE][SIZE];
-    Cursor cursor;                  // Current cursor position
+    int size;
+    int bombs;
+    char* grid;
+    Point cursor;                  // Current cursor position
     float episode_reward;           // Accumulate episode reward
 } Game;
+
+void init(Game* game)
+{
+    game->grid = calloc(game->size * game->size, sizeof(char));
+}
 
 // Precomputed color table for rendering optimization
 const Color PUFF_BACKGROUND = (Color){6, 24, 24, 255};
@@ -74,11 +80,14 @@ void c_close(Game* env);
 
 // Inline function for updating observations (avoid function call overhead)
 static inline void update_observations(Game* game) {
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            game->observations[i * SIZE + j] = game->grid[i][j];
+    for (int i = 0; i < game->size; i++) {
+        for (int j = 0; j < game->size; j++) {
+            game->observations[i * game->size + j] = game->grid[i * game->size + j];
+            //  >= SHOWN ? game->grid[i][j] - SHOWN : EMPTY - 1;
         }
     }
+    game->observations[game->size * game->size] = game->cursor.y;
+    game->observations[game->size * game->size + 1] = game->cursor.x;
 }
 
 void add_log(Game* game) {
@@ -89,23 +98,15 @@ void add_log(Game* game) {
     game->log.n += 1;
 }
 
-static inline unsigned char calc_score(Game* game) {
-    unsigned int revealed = 0;
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            if (game->grid[i][j] > SHOWN) revealed++;
-        }
-    }
-    return revealed;
-}
-
 void c_reset(Game* game) {
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            game->grid[i][j] = EMPTY;
+    srand(time(NULL));
+    for (int i = 0; i < game->size; i++) {
+        for (int j = 0; j < game->size; j++) {
+            game->grid[i * game->size + j] = EMPTY;
         }
     }
-
+    game->cursor.x = 0;
+    game->cursor.y = 0;
     game->score = 0;
     game->tick = 0;
     game->episode_reward = 0;
@@ -113,17 +114,17 @@ void c_reset(Game* game) {
     if (game->terminals) game->terminals[0] = 0;
 
     // Add random bombs
-    for (int added = 0; added < BOMBS; ) {
-        int pos = rand() % (SIZE * SIZE);
-        int y = pos / SIZE;
-        int x = pos % SIZE;
-        if (game->grid[y][x] != BOMB) {
-            game->grid[y][x] = BOMB;
+    for (int added = 0; added < game->bombs; ) {
+        int pos = rand() % (game->size * game->size);
+        int y = pos / game->size;
+        int x = pos % game->size;
+        if (game->grid[y * game->size + x] != BOMB) {
+            game->grid[y * game->size + x] = BOMB;
             // Increment adjacent cells
             for (int i = 0; i < 8; ++i) {
                 int nx = x + DX[i], ny = y + DY[i];
-                if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && game->grid[ny][nx] != BOMB)
-                        game->grid[ny][nx]++;
+                if (nx >= 0 && nx < game->size && ny >= 0 && ny < game->size && game->grid[ny * game->size + nx] != BOMB)
+                        game->grid[ny * game->size + nx]++;
             }
             added++;
         }
@@ -132,11 +133,13 @@ void c_reset(Game* game) {
     update_observations(game);
 }
 
-void reveal_empty(Game* game, int y, int x)
+inline void reveal_empty(Game* game, int y, int x)
 {
-    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE || game->grid[y][x] >= SHOWN) return;
-    if (game->grid[y][x] < SHOWN) game->grid[y][x] += SHOWN;
-    if (game->grid[y][x] == SHOWN) {
+    if (x < 0 || x >= game->size || y < 0 || y >= game->size || game->grid[y * game->size + x] >= SHOWN) return;
+    game->grid[y * game->size + x] += SHOWN;
+    game->score++;
+
+    if (game->grid[y * game->size + x] == SHOWN) {
         for (int i = 0; i < 8; ++i) {
             int nx = x + DX[i], ny = y + DY[i];
             reveal_empty(game, ny, nx);
@@ -144,33 +147,65 @@ void reveal_empty(Game* game, int y, int x)
     }
 }
 
+// void reveal_empty(Game* game, int y, int x) {
+//     if (x < 0 || x >= game->size || y < 0 || y >= game->size || game->grid[y][x] >= SHOWN) {
+//         return;
+//     }
+
+//     Point queue[game->size * game->size];
+//     int head = 0;
+//     int tail = 0;
+//     queue[tail++] = (Point){y, x};
+//     game->grid[y][x] += SHOWN;
+//     while (head < tail) {
+//         Point current = queue[head++];
+
+//         game->score++;
+//         if (game->grid[current.y][current.x] != SHOWN) {
+//             continue;
+//         }
+
+//         for (int i = 0; i < 8; ++i) {
+//             int nx = current.x + DX[i];
+//             int ny = current.y + DY[i];
+
+//             if (nx >= 0 && nx < game->size && ny >= 0 && ny < game->size && game->grid[ny][nx] < SHOWN) {
+//                 game->grid[ny][nx] += SHOWN;
+//                 queue[tail++] = (Point){ny, nx};
+//             }
+//         }
+//     }
+// }
+
 bool move(Game* game, int move, float* reward) {
-    bool moved = true;
-    // printf("Move: %d, Cursor: (%d, %d), val: %d\n", move, game->cursor.x, game->cursor.y, game->grid[game->cursor.y][game->cursor.x]);
-    if (move == DOWN && game->cursor.y < SIZE - 1) game->cursor.y++;
-    else if (move == UP && game->cursor.y > 0) game->cursor.y--;
-    else if (move == LEFT && game->cursor.x > 0) game->cursor.x--;
-    else if (move == RIGHT && game->cursor.x < SIZE - 1) game->cursor.x++;
-    else if (move == CHECK) {
-            if (game->grid[game->cursor.y][game->cursor.x] == BOMB) return 1;
-            reveal_empty(game, game->cursor.y, game->cursor.x);
+    if (move == CHECK && game->grid[game->cursor.y * game->size + game->cursor.x] < SHOWN) {
+        if (game->grid[game->cursor.y * game->size + game->cursor.x] == BOMB) return 1;
+        reveal_empty(game, game->cursor.y, game->cursor.x);
+        *reward = (game->score == 0 ? 3.0f : 1.0f) * CHECK_REWARD;
     }
-    else moved = false;
-
-    *reward = moved? GOOD_MOVE_REWARD: INVALID_MOVE_PENALTY;
-
+    else {
+        *reward = NO_CHECK_PENALTY;
+        if (move == DOWN && game->cursor.y < game->size - 1) game->cursor.y++;
+        else if (move == UP && game->cursor.y > 0) game->cursor.y--;
+        else if (move == LEFT && game->cursor.x > 0) game->cursor.x--;
+        else if (move == RIGHT && game->cursor.x < game->size - 1) game->cursor.x++;
+        else *reward = INVALID_MOVE_PENALTY;
+    }
+    // printf("Move: %d, Cursor: (%d, %d), val: %d, reward: %f\n", move, game->cursor.x, game->cursor.y, game->grid[game->cursor.y][game->cursor.x],*reward);
     return 0;
 }
 
 void c_step(Game* game) {
     float reward = 0.0f;
-    bool game_over = move(game, game->actions[0] + 1, &reward);
+    bool lose = move(game, game->actions[0] + 1, &reward);
+    bool win = (game->score == game->size * game->size - game->bombs);
     game->tick++;
-    game->terminals[0] = game_over ? 1 : 0;
+    game->terminals[0] = win || lose ? 1 : 0;
 
-    if (game_over) {
-        reward = GAME_OVER_PENALTY;
-        game->score = calc_score(game);
+    if (lose) reward = GAME_OVER_PENALTY;
+    else if (win)
+    {
+        reward = -1 * GAME_OVER_PENALTY;
     }
 
     game->rewards[0] = reward;
@@ -182,6 +217,11 @@ void c_step(Game* game) {
         add_log(game);
         c_reset(game);
     }
+    // printf("reward: %f, score: %d\n", reward, game->score);
+    // printf("observations:\n");
+    // for (int i = 0; i < game->size * game->size + 2; i++) {
+    //     printf("%d ", game->observations[i]);
+    // }
 }
 
 // Rendering optimizations
@@ -190,7 +230,7 @@ void c_render(Game* game) {
     static const int px = 30;
 
     if (!window_initialized) {
-        InitWindow(px * SIZE, px * SIZE + 50, "Minesweeper");
+        InitWindow(px * game->size, px * game->size, "Minesweeper");
         SetTargetFPS(30); // Increased for smoother rendering
         window_initialized = true;
     }
@@ -204,14 +244,14 @@ void c_render(Game* game) {
     ClearBackground(PUFF_BACKGROUND);
 
     // Draw grid
-    for (int i = 0; i < SIZE; i++) {
-        for (int j = 0; j < SIZE; j++) {
-            int val = game->grid[i][j];
+    for (int i = 0; i < game->size; i++) {
+        for (int j = 0; j < game->size; j++) {
+            int val = game->grid[i * game->size + j];
 
             Color color = (Color){60, 60, 60, 255};
             // if (val == BOMB) color = PUFF_RED;
-            if (game->cursor.y == i && game->cursor.x == j) color = PUFF_CYAN;
             if (val >= SHOWN && val <= SHOWN + 8) color = PUFF_GREEN;
+            if (game->cursor.y == i && game->cursor.x == j) color = PUFF_CYAN;
 
             DrawRectangle(j * px, i * px, px - 5, px - 5, color);
             if (val > SHOWN) {

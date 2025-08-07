@@ -5,7 +5,7 @@ int main() {
     printf("Starting Minesweeper...\n");
     srand(time(NULL));
     Game env;
-    unsigned char observations[SIZE * SIZE] = {0};
+    unsigned char observations[SIZE * SIZE + 2] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
     float rewards[1] = {0};
