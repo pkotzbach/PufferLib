@@ -190,6 +190,47 @@ class Terraform(nn.Module):
         return action, value
 
 
+class Minesweeper(nn.Module):
+    def __init__(self, env, cnn_channels=32, hidden_size=128):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.is_continuous = False
+
+        self.cnn = nn.Sequential(
+            pufferlib.pytorch.layer_init(
+                nn.Conv2d(1, cnn_channels, 2, stride=1)),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(
+                nn.Conv2d(cnn_channels, cnn_channels, 2, stride=1)),
+            nn.Flatten(),
+            nn.GELU(),
+            pufferlib.pytorch.layer_init(
+            nn.Linear(128, hidden_size), std=0.01),
+        )
+
+        self.decoder = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, env.single_action_space.n), std=0.01)
+        self.value = pufferlib.pytorch.layer_init(
+            nn.Linear(hidden_size, 1), std=1)
+
+    def forward_eval(self, observations, state=None):
+        hidden = self.encode_observations(observations)
+        actions, value = self.decode_actions(hidden)
+        return actions, value
+
+    def forward(self, x, state=None):
+        return self.forward_eval(x, state)
+
+    def encode_observations(self, observations, state=None):
+        #observations = F.one_hot(observations.long(), 16).view(-1, 16, 4, 4).float()
+        observations = observations.float().view(-1, 1, 27)
+        return self.cnn(observations)
+
+    def decode_actions(self, hidden):
+        action = self.decoder(hidden)
+        value = self.value(hidden)
+        return action, value
+
 class G2048(nn.Module):
     def __init__(self, env, cnn_channels=32, hidden_size=128):
         super().__init__()
@@ -253,7 +294,7 @@ class Snake(nn.Module):
             pufferlib.pytorch.layer_init(nn.Linear(encode_dim, hidden_size)),
             nn.ReLU(),
         )
- 
+
         '''
         self.encoder= torch.nn.Sequential(
             nn.Linear(8*np.prod(env.single_observation_space.shape), hidden_size),
@@ -354,7 +395,7 @@ class Go(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
-        # 3 categories 2 boards. 
+        # 3 categories 2 boards.
         # categories = player, opponent, empty
         # boards = current, previous
         self.cnn = nn.Sequential(
@@ -370,9 +411,9 @@ class Go(nn.Module):
         self.grid_size = int(np.sqrt((obs_size-2)/2))
         output_size = self.grid_size - 4
         cnn_flat_size = cnn_channels * output_size * output_size
-        
+
         self.flat = pufferlib.pytorch.layer_init(nn.Linear(2,32))
-        
+
         self.proj = pufferlib.pytorch.layer_init(nn.Linear(cnn_flat_size + 32, hidden_size))
 
         self.actor = pufferlib.pytorch.layer_init(
@@ -380,7 +421,7 @@ class Go(nn.Module):
 
         self.value_fn = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, 1), std=1)
-   
+
     def forward(self, observations, state=None):
         hidden = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden)
@@ -391,7 +432,7 @@ class Go(nn.Module):
 
     def encode_observations(self, observations, state=None):
         grid_size = int(np.sqrt((observations.shape[1] - 2) / 2))
-        full_board = grid_size * grid_size 
+        full_board = grid_size * grid_size
         black_board = observations[:, :full_board].view(-1,1, grid_size,grid_size).float()
         white_board = observations[:, full_board:-2].view(-1,1, grid_size, grid_size).float()
         board_features = torch.cat([black_board, white_board],dim=1)
@@ -412,7 +453,7 @@ class Go(nn.Module):
         value = self.value_fn(flat_hidden)
         action = self.actor(flat_hidden)
         return action, value
-    
+
 class MOBA(nn.Module):
     def __init__(self, env, cnn_channels=128, hidden_size=128, **kwargs):
         super().__init__()
@@ -540,7 +581,7 @@ class TowerClimb(nn.Module):
                 nn.ReLU(),
                 pufferlib.pytorch.layer_init(
                     nn.Conv3d(cnn_channels, cnn_channels, 3, stride=1)),
-                nn.Flatten()       
+                nn.Flatten()
         )
         cnn_flat_size = cnn_channels * 1 * 1 * 5
 
@@ -565,19 +606,19 @@ class TowerClimb(nn.Module):
 
     def encode_observations(self, observations, state=None):
         board_state = observations[:,:225]
-        player_info = observations[:, -3:] 
+        player_info = observations[:, -3:]
         board_features = board_state.view(-1, 1, 5,5,9).float()
         cnn_features = self.network(board_features)
         flat_features = self.flat(player_info.float())
-        
+
         features = torch.cat([cnn_features,flat_features],dim = 1)
         features = self.proj(features)
         return features
-    
+
     def decode_actions(self, flat_hidden):
         action = self.actor(flat_hidden)
         value = self.value_fn(flat_hidden)
-        
+
         return action, value
 
 
@@ -828,7 +869,7 @@ class Drive(nn.Module):
                 nn.Linear(hidden_size, sum(self.atn_dim)), std = 0.01)
         self.value_fn = pufferlib.pytorch.layer_init(
                 nn.Linear(hidden_size, 1 ), std=1)
-    
+
     def forward(self, observations, state=None):
         hidden = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden)
@@ -836,7 +877,7 @@ class Drive(nn.Module):
 
     def forward_train(self, x, state=None):
         return self.forward(x, state)
-   
+
     def encode_observations(self, observations, state=None):
         ego_dim = 7
         partner_dim = 63 * 7
@@ -844,7 +885,7 @@ class Drive(nn.Module):
         ego_obs = observations[:, :ego_dim]
         partner_obs = observations[:, ego_dim:ego_dim+partner_dim]
         road_obs = observations[:, ego_dim+partner_dim:ego_dim+partner_dim+road_dim]
-        
+
         partner_objects = partner_obs.view(-1, 63, 7)
         road_objects = road_obs.view(-1, 200, 7)
         road_continuous = road_objects[:, :, :6]  # First 6 features
@@ -854,14 +895,14 @@ class Drive(nn.Module):
         ego_features = self.ego_encoder(ego_obs)
         partner_features, _ = self.partner_encoder(partner_objects).max(dim=1)
         road_features, _ = self.road_encoder(road_objects).max(dim=1)
-        
+
         concat_features = torch.cat([ego_features, road_features, partner_features], dim=1)
-        
+
         # Pass through shared embedding
         embedding = F.relu(self.shared_embedding(concat_features))
         # embedding = self.shared_embedding(concat_features)
         return embedding
-    
+
     def decode_actions(self, flat_hidden):
         action = self.actor(flat_hidden)
         action = torch.split(action, self.atn_dim, dim=1)
@@ -870,8 +911,8 @@ class Drive(nn.Module):
 
 class Tetris(nn.Module):
     def __init__(
-        self, 
-        env, 
+        self,
+        env,
         cnn_channels=32,
         input_size=128,
         hidden_size=128,
@@ -879,7 +920,7 @@ class Tetris(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        self.cnn_channels =  cnn_channels   
+        self.cnn_channels =  cnn_channels
         self.n_cols = env.n_cols
         self.n_rows = env.n_rows
         self.scalar_input_size = (6 + 7 * (env.deck_size + 1))
@@ -918,7 +959,7 @@ class Tetris(nn.Module):
         )
 
     def forward(self, observations, state=None):
-        hidden = self.encode_observations(observations) 
+        hidden = self.encode_observations(observations)
         actions, value = self.decode_actions(hidden)
         return actions, value
 
@@ -954,9 +995,9 @@ class Drone(nn.Module):
         self.is_continuous = isinstance(env.single_action_space,
                 pufferlib.spaces.Box)
         try:
-            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict)
         except:
-            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict)
 
         if self.is_dict_obs:
             self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
@@ -999,7 +1040,7 @@ class Drone(nn.Module):
         if self.is_dict_obs:
             observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
             observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
-        else: 
+        else:
             observations = observations.view(batch_size, -1)
         return self.encoder(observations.float())
 

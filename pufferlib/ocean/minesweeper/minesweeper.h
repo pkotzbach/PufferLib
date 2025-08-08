@@ -18,11 +18,11 @@
 
 // Precomputed constants
 #define REWARD_MULTIPLIER 0.09090909f
-#define GAME_OVER_PENALTY -1.0f
+#define GAME_OVER_PENALTY -0.5f
+#define WIN_REWARD 2.0f
 #define CHECK_REWARD 0.25f
-#define NO_CHECK_PENALTY -0.02f
-#define INVALID_MOVE_PENALTY -0.05f
-// #define MOVE_ON_SHOWN_PENTALTY -0.2f
+#define MOVED_TO_VISITED_PENTALTY -0.1f
+#define INVALID_MOVE_PENALTY -0.1f
 
 
 typedef struct {
@@ -49,6 +49,7 @@ typedef struct {
     int size;
     int bombs;
     char* grid;
+    bool* visited;
     Point cursor;                  // Current cursor position
     float episode_reward;           // Accumulate episode reward
 } Game;
@@ -56,6 +57,8 @@ typedef struct {
 void init(Game* game)
 {
     game->grid = calloc(game->size * game->size, sizeof(char));
+    game->visited = calloc(game->size * game->size, sizeof(bool));
+    srand(time(NULL));
 }
 
 // Precomputed color table for rendering optimization
@@ -82,12 +85,21 @@ void c_close(Game* env);
 static inline void update_observations(Game* game) {
     for (int i = 0; i < game->size; i++) {
         for (int j = 0; j < game->size; j++) {
-            game->observations[i * game->size + j] = game->grid[i * game->size + j];
-            //  >= SHOWN ? game->grid[i][j] - SHOWN : EMPTY - 1;
+            game->observations[i * game->size + j] = game->grid[i * game->size + j] >= SHOWN ? game->grid[i * game->size + j] - SHOWN : EMPTY - 1;
         }
     }
-    game->observations[game->size * game->size] = game->cursor.y;
-    game->observations[game->size * game->size + 1] = game->cursor.x;
+
+    char* visited_channel = game->observations + (game->size * game->size);
+    char* cursor_channel = game->observations + (2 * game->size * game->size);
+
+    for (int i = 0; i < game->size; i++) {
+        for (int j = 0; j < game->size; j++) {
+            visited_channel[i * game->size + j] = game->visited[i * game->size + j];
+        }
+    }
+
+    cursor_channel[0] = game->cursor.y;
+    cursor_channel[1] = game->cursor.x;
 }
 
 void add_log(Game* game) {
@@ -99,10 +111,10 @@ void add_log(Game* game) {
 }
 
 void c_reset(Game* game) {
-    srand(time(NULL));
     for (int i = 0; i < game->size; i++) {
         for (int j = 0; j < game->size; j++) {
             game->grid[i * game->size + j] = EMPTY;
+            game->visited[i * game->size + j] = false;
         }
     }
     game->cursor.x = 0;
@@ -184,12 +196,19 @@ bool move(Game* game, int move, float* reward) {
         *reward = (game->score == 0 ? 3.0f : 1.0f) * CHECK_REWARD;
     }
     else {
-        *reward = NO_CHECK_PENALTY;
+        int x = game->cursor.x;
+        int y = game->cursor.y;
+        bool moved = true;
         if (move == DOWN && game->cursor.y < game->size - 1) game->cursor.y++;
         else if (move == UP && game->cursor.y > 0) game->cursor.y--;
         else if (move == LEFT && game->cursor.x > 0) game->cursor.x--;
         else if (move == RIGHT && game->cursor.x < game->size - 1) game->cursor.x++;
-        else *reward = INVALID_MOVE_PENALTY;
+        else moved = false;
+        if (moved) {
+            game->visited[y * game->size + x] = true;
+            if (game->visited[game->cursor.y * game->size + game->cursor.x] == true)
+                *reward = MOVED_TO_VISITED_PENTALTY;
+        }
     }
     // printf("Move: %d, Cursor: (%d, %d), val: %d, reward: %f\n", move, game->cursor.x, game->cursor.y, game->grid[game->cursor.y][game->cursor.x],*reward);
     return 0;
@@ -203,10 +222,7 @@ void c_step(Game* game) {
     game->terminals[0] = win || lose ? 1 : 0;
 
     if (lose) reward = GAME_OVER_PENALTY;
-    else if (win)
-    {
-        reward = -1 * GAME_OVER_PENALTY;
-    }
+    else if (win) reward = WIN_REWARD;
 
     game->rewards[0] = reward;
     game->episode_reward += reward;
@@ -214,6 +230,7 @@ void c_step(Game* game) {
     update_observations(game);
 
     if (game->terminals[0]) {
+        // printf("%f\n",game->episode_reward);
         add_log(game);
         c_reset(game);
     }
@@ -222,6 +239,7 @@ void c_step(Game* game) {
     // for (int i = 0; i < game->size * game->size + 2; i++) {
     //     printf("%d ", game->observations[i]);
     // }
+    // usleep(100); // Sleep for 10ms to reduce CPU usage
 }
 
 // Rendering optimizations

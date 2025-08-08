@@ -5,6 +5,10 @@ int main() {
     printf("Starting Minesweeper...\n");
     srand(time(NULL));
     Game env;
+    const int SIZE = 5;
+    env.size = SIZE;
+    env.bombs = 0;
+    init(&env);
     unsigned char observations[SIZE * SIZE + 2] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
