@@ -153,7 +153,7 @@ if not NO_OCEAN:
 # - <= 0.20 is missing dict methods for gym.spaces.Dict
 # - 0.18-0.21 require setuptools<=65.5.0
 
-# Extensions 
+# Extensions
 class BuildExt(build_ext):
     def run(self):
         # Propagate any build_ext options (e.g., --inplace, --force) to subcommands
@@ -189,7 +189,7 @@ extension_kwargs = dict(
 # Find C extensions
 c_extensions = []
 if not NO_OCEAN:
-    c_extension_paths = glob.glob('pufferlib/ocean/**/binding.c', recursive=True)
+    c_extension_paths = glob.glob('pufferlib/ocean/minesweeper/binding.c', recursive=True)
     c_extensions = [
         Extension(
             path.rstrip('.c').replace('/', '.'),

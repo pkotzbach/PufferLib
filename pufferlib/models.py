@@ -29,9 +29,9 @@ class Default(nn.Module):
         self.is_continuous = isinstance(env.single_action_space,
                 pufferlib.spaces.Box)
         try:
-            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.env.observation_space, pufferlib.spaces.Dict)
         except:
-            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict) 
+            self.is_dict_obs = isinstance(env.observation_space, pufferlib.spaces.Dict)
 
         if self.is_dict_obs:
             self.dtype = pufferlib.pytorch.nativize_dtype(env.emulated)
@@ -43,7 +43,7 @@ class Default(nn.Module):
                 pufferlib.pytorch.layer_init(nn.Linear(num_obs, hidden_size)),
                 nn.GELU(),
             )
-            
+
         if self.is_multidiscrete:
             self.action_nvec = tuple(env.single_action_space.nvec)
             num_atns = sum(self.action_nvec)
@@ -77,7 +77,7 @@ class Default(nn.Module):
         if self.is_dict_obs:
             observations = pufferlib.pytorch.nativize_tensor(observations, self.dtype)
             observations = torch.cat([v.view(batch_size, -1) for v in observations.values()], dim=1)
-        else: 
+        else:
             observations = observations.view(batch_size, -1)
         return self.encoder(observations.float())
 
@@ -186,7 +186,7 @@ class LSTMWrapper(nn.Module):
         #hidden = self.pre_layernorm(hidden)
         hidden, (lstm_h, lstm_c) = self.lstm.forward(hidden, lstm_state)
         hidden = hidden.float()
- 
+
         #hidden = self.post_layernorm(hidden)
         hidden = hidden.transpose(0, 1)
 
@@ -205,7 +205,7 @@ class Convolutional(nn.Module):
             channels_last=False, downsample=1, **kwargs):
         '''The CleanRL default NatureCNN policy used for Atari.
         It's just a stack of three convolutions followed by a linear layer
-        
+
         Takes framestack as a mandatory keyword argument. Suggested default is 1 frame
         with LSTM or 4 frames without.'''
         super().__init__()
@@ -238,6 +238,9 @@ class Convolutional(nn.Module):
         return actions, value
 
     def forward_train(self, observations, state=None):
+        return self.forward(observations, state)
+
+    def forward_eval(self, observations, state=None):
         return self.forward(observations, state)
 
     def encode_observations(self, observations, state=None):
@@ -287,7 +290,7 @@ class ProcgenResnet(nn.Module):
     def encode_observations(self, x):
         hidden = self.network(x.permute((0, 3, 1, 2)) / 255.0)
         return hidden
- 
+
     def decode_actions(self, hidden):
         '''linear decoder function'''
         action = self.actor(hidden)

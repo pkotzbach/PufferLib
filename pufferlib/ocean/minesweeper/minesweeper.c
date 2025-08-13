@@ -1,15 +1,16 @@
 #include "minesweeper.h"
 #include "puffernet.h"
 
+#define SIZE 5
+
 int main() {
     printf("Starting Minesweeper...\n");
     srand(time(NULL));
     Game env;
-    const int SIZE = 5;
     env.size = SIZE;
-    env.bombs = 0;
+    env.bombs = 5;
     init(&env);
-    unsigned char observations[SIZE * SIZE + 2] = {0};
+    unsigned char observations[SIZE * SIZE] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
     float rewards[1] = {0};
@@ -31,14 +32,20 @@ int main() {
         c_render(&env);
         frame++;
 
-        int action = 0;
-        if (IsKeyDown(KEY_LEFT_SHIFT)) {
-            if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP)) action = UP;
-            else if (IsKeyPressed(KEY_S) || IsKeyPressed(KEY_DOWN)) action = DOWN;
-            else if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT)) action = LEFT;
-            else if (IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) action = RIGHT;
-            else if (IsKeyPressed(KEY_ENTER)) action = CHECK;
-            env.actions[0] = action - 1;
+        int action = -1;
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            printf("click\n");
+            Vector2 mouse = GetMousePosition();
+            for (int i = 0; i < env.size; i++) {
+                for (int j = 0; j < env.size; j++) {
+                    Rectangle cell = {j * px, i * px, px - 5, px - 5};
+                    if (CheckCollisionPointRec(mouse, cell)) action = i * env.size + j;
+                }
+            }
+            for (int i = 0; i < env.size * env.size; i++)
+                printf("%d ", env.grid[i]);
+            printf("action: %d\n", action);
+            env.actions[0] = action;
         } else if (frame % 10 != 0) {
             continue;
         } else {
@@ -48,10 +55,8 @@ int main() {
             // }
             // forward_linearlstm(net, net->obs, env.actions);
         }
-
-        if (action != 0) {
+        if (action >= 0 && action < env.size * env.size)
             c_step(&env);
-        }
     }
 
     c_close(&env);

@@ -189,23 +189,24 @@ class Terraform(nn.Module):
         value = self.value(hidden)
         return action, value
 
-
+import math
 class Minesweeper(nn.Module):
-    def __init__(self, env, cnn_channels=32, hidden_size=128):
+    def __init__(self, env, cnn_channels=32, hidden_size=2048):
         super().__init__()
         self.hidden_size = hidden_size
         self.is_continuous = False
 
         self.cnn = nn.Sequential(
             pufferlib.pytorch.layer_init(
-                nn.Conv2d(1, cnn_channels, 2, stride=1)),
+                nn.Conv2d(1, cnn_channels, 3, stride=1)),
             nn.GELU(),
-            pufferlib.pytorch.layer_init(
-                nn.Conv2d(cnn_channels, cnn_channels, 2, stride=1)),
+            # pufferlib.pytorch.layer_init(
+            #     nn.Conv2d(cnn_channels, cnn_channels, 3, stride=1)),
+            # nn.GELU(),
+            # nn.MaxPool2d(2),
             nn.Flatten(),
-            nn.GELU(),
             pufferlib.pytorch.layer_init(
-            nn.Linear(128, hidden_size), std=0.01),
+            nn.Linear(6272, hidden_size), std=0.01),
         )
 
         self.decoder = pufferlib.pytorch.layer_init(
@@ -222,8 +223,10 @@ class Minesweeper(nn.Module):
         return self.forward_eval(x, state)
 
     def encode_observations(self, observations, state=None):
-        #observations = F.one_hot(observations.long(), 16).view(-1, 16, 4, 4).float()
-        observations = observations.float().view(-1, 1, 27)
+        # side = int(math.sqrt(observations.shape[0]))
+        side = 16
+        # observations = F.one_hot(observations.long(), num_classes=10).view(-1, 10, 9, 9).float()
+        observations = observations.float().view(-1, 1, side, side)
         return self.cnn(observations)
 
     def decode_actions(self, hidden):

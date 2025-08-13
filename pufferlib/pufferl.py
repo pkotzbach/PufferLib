@@ -126,7 +126,7 @@ class PuffeRL:
 
         self.accumulate_minibatches = max(1, minibatch_size // max_minibatch_size)
         self.total_minibatches = int(config['update_epochs'] * batch_size / self.minibatch_size)
-        self.minibatch_segments = self.minibatch_size // horizon 
+        self.minibatch_segments = self.minibatch_size // horizon
         if self.minibatch_segments * horizon != self.minibatch_size:
             raise pufferlib.APIUsageError(
                 f'minibatch_size {self.minibatch_size} must be divisible by bptt_horizon {horizon}'
@@ -504,7 +504,7 @@ class PuffeRL:
         if torch.distributed.is_initialized():
            if torch.distributed.get_rank() != 0:
                return
- 
+
         run_id = self.logger.run_id
         path = os.path.join(self.config['data_dir'], f'{self.config["env"]}_{run_id}')
         if not os.path.exists(path):
@@ -538,7 +538,7 @@ class PuffeRL:
         if torch.distributed.is_initialized():
            if torch.distributed.get_rank() != 0:
                return
- 
+
         profile = self.profile
         console = Console()
         dashboard = Table(box=rich.box.ROUNDED, expand=True,
@@ -560,7 +560,7 @@ class PuffeRL:
             f'{c1}VRAM: {b2}{np.mean(self.utilization.gpu_mem):.1f}{c2}%',
         )
         idx[0] = (idx[0] - 1) % 10
-            
+
         s = Table(box=None, expand=True)
         remaining = 'A hair past a freckle'
         if sps != 0:
@@ -836,7 +836,7 @@ class NeptuneLogger:
     def download(self):
         self.neptune["model"].download(destination='artifacts')
         return f'artifacts/{self.run_id}.pt'
- 
+
 class WandbLogger:
     def __init__(self, args, load_id=None, resume='allow'):
         import wandb
@@ -867,7 +867,7 @@ class WandbLogger:
         data_dir = artifact.download()
         model_file = max(os.listdir(data_dir))
         return f'{data_dir}/{model_file}'
- 
+
 def train(env_name, args=None, vecenv=None, policy=None, logger=None):
     args = args or load_config(env_name)
 
@@ -988,6 +988,9 @@ def eval(env_name, args=None, vecenv=None, policy=None):
             action = np.clip(action, vecenv.action_space.low, vecenv.action_space.high)
 
         ob = vecenv.step(action)[0]
+        # np.set_printoptions(threshold=np.inf)
+        # print(ob)
+        # print("------------------")
 
         if len(frames) > 0 and len(frames) == args['save_frames']:
             import imageio
@@ -1055,7 +1058,7 @@ def export(args=None, env_name=None, vecenv=None, policy=None):
     for name, param in policy.named_parameters():
         weights.append(param.data.cpu().numpy().flatten())
         print(name, param.shape, param.data.cpu().numpy().ravel()[0])
-    
+
     path = f'{args["env_name"]}_weights.bin'
     weights = np.concatenate(weights)
     weights.tofile(path)
@@ -1068,7 +1071,7 @@ def autotune(args=None, env_name=None, vecenv=None, policy=None):
     env_name = args['env_name']
     make_env = env_module.env_creator(env_name)
     pufferlib.vector.autotune(make_env, batch_size=args['train']['env_batch_size'])
- 
+
 def load_env(env_name, args):
     package = args['package']
     module_name = 'pufferlib.ocean' if package == 'ocean' else f'pufferlib.environments.{package}'
@@ -1116,7 +1119,7 @@ def load_policy(args, vecenv, env_name=''):
         #state_path = os.path.join(*load_path.split('/')[:-1], 'state.pt')
         #optim_state = torch.load(state_path)['optimizer_state_dict']
         #pufferl.optimizer.load_state_dict(optim_state)
-
+    print(policy)
     return policy
 
 def load_config(env_name):
