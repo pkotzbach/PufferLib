@@ -6,7 +6,7 @@
 #include <string.h>
 #include "raylib.h"
 
-#define EMPTY 0
+#define UNREVEALED 0
 #define SHOWN 10
 #define BOMB 9
 
@@ -16,12 +16,14 @@
 #define RIGHT 4
 #define CHECK 5
 
+#define OBS_EDGE_SIZE 5
+
 // Precomputed constants
-#define REWARD_MULTIPLIER 0.09090909f
-#define GAME_OVER_PENALTY -0.5f
+#define GAME_OVER_PENALTY -2.0f
 #define WIN_REWARD 2.0f
-#define CHECK_REWARD 0.25f
-#define MOVED_TO_VISITED_PENTALTY -0.1f
+#define CHECK_REWARD 0.05f
+#define CHECK_FRONTIER_REWARD 0.3f
+#define MOVE_TO_REVALED_PENALTY -0.01f
 #define INVALID_MOVE_PENALTY -0.1f
 
 
@@ -39,6 +41,13 @@ typedef struct {
 } Point;
 
 typedef struct {
+    bool covered;
+    bool is_bomb;
+    float bombs_nearby;
+    float revealed_nearby;
+} Cell;
+
+typedef struct {
     Log log;                        // Required
     char* observations;    // Cheaper in memory if encoded in uint_8
     int* actions;                   // Required
@@ -48,17 +57,23 @@ typedef struct {
     int tick;
     int size;
     int bombs;
-    char* grid;
-    bool* visited;
+    Cell* grid;
+    bool* revealed;
     Point cursor;                  // Current cursor position
     float episode_reward;           // Accumulate episode reward
+
+    float message_start_time;
+    int message_type; // 0=none, 1=success, 2=failure
+    bool show_message;
 } Game;
 
 void init(Game* game)
 {
-    game->grid = calloc(game->size * game->size, sizeof(char));
-    game->visited = calloc(game->size * game->size, sizeof(bool));
-    srand(time(NULL));
+    game->grid = calloc(game->size * game->size, sizeof(Cell));
+    game->revealed = calloc(game->size * game->size, sizeof(bool));
+    game->message_type = 0;
+    game->message_start_time = 0.0f;
+    game->show_message = false;
 }
 
 // Precomputed color table for rendering optimization
@@ -82,29 +97,50 @@ void c_render(Game* env);
 void c_close(Game* env);
 
 // Inline function for updating observations (avoid function call overhead)
-static inline void update_observations(Game* game) {
-    for (int i = 0; i < game->size; i++) {
-        for (int j = 0; j < game->size; j++) {
-            game->observations[i * game->size + j] = game->grid[i * game->size + j] >= SHOWN ? game->grid[i * game->size + j] - SHOWN : EMPTY - 1;
+void update_observations(Game* game) {
+    GridObservation observations[OBS_EDGE_SIZE * OBS_EDGE_SIZE] = {0};
+    for (int i = 0; i < OBS_EDGE_SIZE; i++) {
+        for (int j = 0; j < OBS_EDGE_SIZE; j++) {
+            GridObservation *obs = &observations[i * OBS_EDGE_SIZE + j];
+            int nx = game->cursor.x + j - OBS_EDGE_SIZE / 2;
+            int ny = game->cursor.y + i - OBS_EDGE_SIZE / 2;
+            int grid_idx = ny * game->size + nx;
+            int obs_idx = i * OBS_EDGE_SIZE + j;
+            if (nx < 0 || nx >= game->size || ny < 0 || ny >= game->size) {
+                obs->covered = true;
+                obs->bombs_nearby = 0.0f;
+                obs->revealed_nearby = 0.0f;
+            }
+            else {
+                obs->covered = game->grid[grid_idx] < SHOWN;
+                obs->bombs_nearby = game->grid[grid_idx] >= SHOWN? (float)(game->grid[grid_idx] - SHOWN)/8.0f : 0.0f;
+                for (int i = 0; i < 8; ++i) {
+                    int rx = nx + DX[i], ry = ny + DY[i];
+                    if (nx >= 0 && nx < game->size && ny >= 0 && ny < game->size && game->grid[ny * game->size + nx] != BOMB)
+                            game->grid[ny * game->size + nx]++;
+                }
+            }
+                obs->revealed_nearby = (game->revealed[grid_idx]) ? 1.0f : 0.0f;
+            }
+                // game->observations[obs_idx] = game->grid[grid_idx] >= SHOWN ? game->grid[grid_idx] - SHOWN + 1 : UNREVEALED;
+                game->observations[obs_idx] = game->grid[grid_idx];
+            }
         }
     }
 
-    char* visited_channel = game->observations + (game->size * game->size);
-    char* cursor_channel = game->observations + (2 * game->size * game->size);
-
-    for (int i = 0; i < game->size; i++) {
-        for (int j = 0; j < game->size; j++) {
-            visited_channel[i * game->size + j] = game->visited[i * game->size + j];
-        }
-    }
-
+    char* cursor_channel = game->observations + (OBS_EDGE_SIZE * OBS_EDGE_SIZE);
     cursor_channel[0] = game->cursor.y;
     cursor_channel[1] = game->cursor.x;
+
+    char* visited_channel = game->observations + (OBS_EDGE_SIZE * OBS_EDGE_SIZE) + 2;
+    for (int i = 0; i < game->size * game->size; i++) {
+        visited_channel[i] = game->revealed[i] ? 1 : 0;
+    }
 }
 
 void add_log(Game* game) {
-    game->log.score = (float)(1 << game->score);
-    game->log.perf += ((float)game->score) * REWARD_MULTIPLIER;
+    game->log.score = (float)(game->score);
+    game->log.perf += ((float)game->score) / ((float)game->tick);
     game->log.episode_length += game->tick;
     game->log.episode_return += game->episode_reward;
     game->log.n += 1;
@@ -113,8 +149,8 @@ void add_log(Game* game) {
 void c_reset(Game* game) {
     for (int i = 0; i < game->size; i++) {
         for (int j = 0; j < game->size; j++) {
-            game->grid[i * game->size + j] = EMPTY;
-            game->visited[i * game->size + j] = false;
+            game->grid[i * game->size + j] = UNREVEALED;
+            game->revealed[i * game->size + j] = false;
         }
     }
     game->cursor.x = 0;
@@ -145,70 +181,49 @@ void c_reset(Game* game) {
     update_observations(game);
 }
 
-inline void reveal_empty(Game* game, int y, int x)
+void reveal_UNREVEALED(Game* game, int y, int x)
 {
     if (x < 0 || x >= game->size || y < 0 || y >= game->size || game->grid[y * game->size + x] >= SHOWN) return;
     game->grid[y * game->size + x] += SHOWN;
+    game->revealed[y * game->size + x] = true;
     game->score++;
 
     if (game->grid[y * game->size + x] == SHOWN) {
         for (int i = 0; i < 8; ++i) {
             int nx = x + DX[i], ny = y + DY[i];
-            reveal_empty(game, ny, nx);
+            reveal_UNREVEALED(game, ny, nx);
         }
     }
 }
 
-// void reveal_empty(Game* game, int y, int x) {
-//     if (x < 0 || x >= game->size || y < 0 || y >= game->size || game->grid[y][x] >= SHOWN) {
-//         return;
-//     }
-
-//     Point queue[game->size * game->size];
-//     int head = 0;
-//     int tail = 0;
-//     queue[tail++] = (Point){y, x};
-//     game->grid[y][x] += SHOWN;
-//     while (head < tail) {
-//         Point current = queue[head++];
-
-//         game->score++;
-//         if (game->grid[current.y][current.x] != SHOWN) {
-//             continue;
-//         }
-
-//         for (int i = 0; i < 8; ++i) {
-//             int nx = current.x + DX[i];
-//             int ny = current.y + DY[i];
-
-//             if (nx >= 0 && nx < game->size && ny >= 0 && ny < game->size && game->grid[ny][nx] < SHOWN) {
-//                 game->grid[ny][nx] += SHOWN;
-//                 queue[tail++] = (Point){ny, nx};
-//             }
-//         }
-//     }
-// }
 
 bool move(Game* game, int move, float* reward) {
     if (move == CHECK && game->grid[game->cursor.y * game->size + game->cursor.x] < SHOWN) {
         if (game->grid[game->cursor.y * game->size + game->cursor.x] == BOMB) return 1;
-        reveal_empty(game, game->cursor.y, game->cursor.x);
-        *reward = (game->score == 0 ? 3.0f : 1.0f) * CHECK_REWARD;
+        reveal_UNREVEALED(game, game->cursor.y, game->cursor.x);
+        *reward = CHECK_REWARD;
+        int nearby_revealed = 0;
+        for (int i = 0; i < 8; ++i) {
+            int nx = game->cursor.x + DX[i], ny = game->cursor.y + DY[i];
+            if (nx >= 0 && nx < game->size && ny >= 0 && ny < game->size && game->grid[ny * game->size + nx] >= SHOWN)
+                    nearby_revealed++;
+        }
+
+        if (nearby_revealed >= 3)
+            *reward = CHECK_FRONTIER_REWARD;
     }
     else {
-        int x = game->cursor.x;
-        int y = game->cursor.y;
         bool moved = true;
         if (move == DOWN && game->cursor.y < game->size - 1) game->cursor.y++;
         else if (move == UP && game->cursor.y > 0) game->cursor.y--;
         else if (move == LEFT && game->cursor.x > 0) game->cursor.x--;
         else if (move == RIGHT && game->cursor.x < game->size - 1) game->cursor.x++;
         else moved = false;
-        if (moved) {
-            game->visited[y * game->size + x] = true;
-            if (game->visited[game->cursor.y * game->size + game->cursor.x] == true)
-                *reward = MOVED_TO_VISITED_PENTALTY;
+        if (moved)
+        {
+            if (game->revealed[game->cursor.y * game->size + game->cursor.x]) *reward = MOVE_TO_REVALED_PENALTY;
         }
+        else *reward = INVALID_MOVE_PENALTY;
     }
     // printf("Move: %d, Cursor: (%d, %d), val: %d, reward: %f\n", move, game->cursor.x, game->cursor.y, game->grid[game->cursor.y][game->cursor.x],*reward);
     return 0;
@@ -221,8 +236,20 @@ void c_step(Game* game) {
     game->tick++;
     game->terminals[0] = win || lose ? 1 : 0;
 
-    if (lose) reward = GAME_OVER_PENALTY;
-    else if (win) reward = WIN_REWARD;
+    if (lose)
+    {
+        if (game->score >= game->size) reward = GAME_OVER_PENALTY; // no penalty for small scores
+        game->message_type = 2;
+        game->message_start_time = GetTime();
+        game->show_message = true;
+    }
+    else if (win)
+    {
+        reward = WIN_REWARD;
+        game->message_type = 1;
+        game->message_start_time = GetTime();
+        game->show_message = true;
+    }
 
     game->rewards[0] = reward;
     game->episode_reward += reward;
@@ -248,7 +275,7 @@ void c_render(Game* game) {
     static const int px = 30;
 
     if (!window_initialized) {
-        InitWindow(px * game->size, px * game->size, "Minesweeper");
+        InitWindow(px * game->size, px * game->size + 50, "Minesweeper");
         SetTargetFPS(30); // Increased for smoother rendering
         window_initialized = true;
     }
@@ -279,11 +306,38 @@ void c_render(Game* game) {
         }
     }
 
+    if (game->show_message) {
+        float currentTime = GetTime();
+        float elapsed = currentTime - game->message_start_time;
+        if (elapsed < 0.7f) { // Show message for 0.7 seconds
+            const char* message = "";
+            Color messageColor = PUFF_WHITE;
+            if (game->message_type == 1) {
+                message = "You won!";
+                messageColor = PUFF_CYAN;
+            }
+            else if (game->message_type == 2) {
+                message = "You lost!";
+                messageColor = PUFF_RED;
+            }
+            int fontSize = 20;
+            int textWidth = MeasureText(message, fontSize);
+            int textX = (GetScreenWidth() - textWidth) / 2;
+            int textY = (GetScreenHeight() - fontSize * 2);
+            DrawText(message, textX, textY, fontSize, messageColor);
+        }
+        else {
+            game->show_message = false; // Hide message after duration
+        }
+    }
+
     EndDrawing();
 }
 
 void c_close(Game* game) {
     if (IsWindowReady()) {
         CloseWindow();
+        free(game->grid);
+        free(game->revealed);
     }
 }

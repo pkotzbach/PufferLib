@@ -7,9 +7,9 @@ int main() {
     Game env;
     const int SIZE = 5;
     env.size = SIZE;
-    env.bombs = 0;
+    env.bombs = 5;
     init(&env);
-    unsigned char observations[SIZE * SIZE + 2] = {0};
+    unsigned char observations[OBS_EDGE_SIZE*OBS_EDGE_SIZE + 2 + SIZE*SIZE] = {0};
     unsigned char terminals[1] = {0};
     int actions[1] = {0};
     float rewards[1] = {0};

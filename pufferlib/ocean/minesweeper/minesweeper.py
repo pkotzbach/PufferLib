@@ -7,12 +7,12 @@ import pufferlib
 from pufferlib.ocean.minesweeper import binding
 
 class Minesweeper(pufferlib.PufferEnv):
-    def __init__(self, num_envs=1, render_mode=None, log_interval=128, buf=None, seed=0, bombs=5, size=5):
+    def __init__(self, num_envs=1, render_mode=None, log_interval=128, buf=None, seed=0, bombs=40, size=16):
         assert (bombs > 0 and size > 0)
         assert (size * size > bombs)
         self.bombs = bombs
         self.size = size
-        self.single_observation_space = gymnasium.spaces.Box(low=-1, high=20, shape=(self.size * self.size + 2,), dtype=np.int8)
+        self.single_observation_space = gymnasium.spaces.Box(low=-1, high=20, shape=(5*5+2+size*size,), dtype=np.int8)
         self.single_action_space = gymnasium.spaces.Discrete(5)
         self.render_mode = render_mode
         self.num_agents = num_envs
